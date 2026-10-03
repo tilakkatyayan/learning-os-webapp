@@ -114,7 +114,8 @@ class AirtableClient:
         records: list[dict[str, Any]] = []
         offset = None
         for _ in range(max_pages):
-            url = f"https://api.airtable.com/v0/{self.base_id}/{quote(table_id, safe='')}?pageSize={page_size}"
+            # FIELDS maps stable Airtable field IDs, so request ID-keyed responses.
+            url = f"https://api.airtable.com/v0/{self.base_id}/{quote(table_id, safe='')}?pageSize={page_size}&returnFieldsByFieldId=true"
             if offset:
                 url += f"&offset={quote(offset, safe='')}"
             req = Request(url, headers={"Authorization": f"Bearer {self.token}"})
