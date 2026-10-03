@@ -28,7 +28,8 @@ FIELDS = {
         "subject": "fldxq2ex3lz3lca42",
         "topic": "fldw7i1ZxlMr6eiXP",
         "mission": "fldxnGkArtbR3gtLq",
-        "mastery": "fldwCHbEMCIUTu0LP",
+        # Airtable's learner-state field is Confidence, not assessed mastery.
+        "confidence": "fldwCHbEMCIUTu0LP",
         "understanding": "fldoqhoRwhrnIAtij",
         "weakness": "fldQD7eeuaQ80iwaB",
         "mode": "fldP2rJRz1v2JElbm",
@@ -55,10 +56,20 @@ FIELDS = {
         "goal": "fldUtoDiAJ67YEwwX",
         "skills": "fldJKqDU9QDqRAisM",
         "status": "fldIMt1T2BO8a2GVu",
+        "architecture_complete": "fld3U7pIKWtWb6RP5",
+        "code_complete": "fld4vFjs4LIJDLUKb",
+        "tests_complete": "fldNSOQCge9SeFg6E",
+        "deployed": "fldKwQqg4fceTKkkD",
+        "observed": "fldOAOItyiCBmlqb5",
+        "business_impact": "fld4J0oxaiGIaRwre",
+        "resume_bullet": "fld3UMjD9MVePun8Q",
+        "interview_ready": "fld5tlq174Gjggcc5",
+        "notes": "fldnaRJtUWyBU0sdW",
     },
     "project_decisions": {
         "id": "fldMd3dofWnUuT5TI",
         "project": "fldotVXFUdBeubVVF",
+        "project_record_id": "fldV0mtWyZHmiWPNC",
         "mission": "fldlex8NovABvXkjC",
         "subject": "fldMKimDYJjkT6qU5",
         "goal": "fldXpfsiZqIxHIwsg",
@@ -125,7 +136,10 @@ def fields_of(record: dict[str, Any]) -> dict[str, Any]:
 
 def normalized_record(record: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
     src = fields_of(record)
-    return {name: choice(src.get(field_id)) for name, field_id in mapping.items()}
+    return {
+        "record_id": record.get("id"),
+        **{name: choice(src.get(field_id)) for name, field_id in mapping.items()},
+    }
 
 
 def live_state(client: AirtableClient) -> dict[str, Any]:
@@ -143,9 +157,25 @@ def live_state(client: AirtableClient) -> dict[str, Any]:
     ), None)
 
     project_rows = [normalized_record(r, FIELDS["projects"]) for r in projects]
-    current_decisions = [normalized_record(r, FIELDS["project_decisions"]) for r in decisions
-                         if normalized_record(r, FIELDS["project_decisions"]).get("mission") == state.get("mission")]
-    project_decision = current_decisions[-1] if current_decisions else None
+    projects_by_record_id = {project["record_id"]: project for project in project_rows}
+    projects_by_name: dict[str, list[dict[str, Any]]] = {}
+    for project in project_rows:
+        if project.get("name"):
+            projects_by_name.setdefault(str(project["name"]).strip().casefold(), []).append(project)
+
+    # Keep every decision for the active mission. The table has no timestamp field,
+    # so ordering records here would incorrectly imply which decision is newest.
+    active_mission_id = state.get("mission")
+    current_decisions = [normalized_record(r, FIELDS["project_decisions"]) for r in decisions]
+    current_decisions = [d for d in current_decisions if active_mission_id and d.get("mission") == active_mission_id]
+    for decision in current_decisions:
+        project = projects_by_record_id.get(decision.get("project_record_id"))
+        if project is None and decision.get("project"):
+            # Legacy decisions may lack the record ID. Resolve only an unambiguous name.
+            matches = projects_by_name.get(str(decision["project"]).strip().casefold(), [])
+            if len(matches) == 1:
+                project = matches[0]
+        decision["project_record"] = project
 
     radar_rows = [normalized_record(r, FIELDS["radar"]) for r in radar]
     return {
@@ -154,7 +184,7 @@ def live_state(client: AirtableClient) -> dict[str, Any]:
         "state": state,
         "mission": current_mission,
         "projects": project_rows,
-        "project_decision": project_decision,
+        "project_decisions": current_decisions,
         "radar": radar_rows,
     }
 
